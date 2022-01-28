@@ -6,37 +6,21 @@ struct ActivitiesTableModel {
 }
 
 class ActivityController: UIViewController {
-    
+
     private var selectedSection: Int!
     private var selectedRow: Int!
 
-    private let tableData: [ActivitiesTableModel] = [
-        ActivitiesTableModel(
-            date: "Вчера",
-            activities: [ActivityCellModel(
-                distance: "14.32 км",
-                duration: "2 часа 46 минут",
-                type: "Велосипед",
-                icon: UIImage(systemName: "bicycle.circle.fill") ?? UIImage(),
-                startTime: "14:49",
-                stopTime: "16:31",
-                timeAgo: "14 часов назад")
-            ]),
-        ActivitiesTableModel(
-            date: "Май 2020 года",
-            activities: [ActivityCellModel(
-                distance: "14.32 км",
-                duration: "2 часа 46 минут",
-                type: "Велосипед",
-                icon: UIImage(systemName: "bicycle.circle.fill") ?? UIImage(),
-                startTime: "14:49",
-                stopTime: "16:31",
-                timeAgo: "14 часов назад")
-            ])	
-    ]
+    private var tableData: [ActivitiesTableModel] = []
+    private var activitiesGroup: Int = 0 {
+        didSet {
+            fetch()
+        }
+    }
 
     @IBOutlet weak var activityTableView: UITableView!
     @IBOutlet weak var emptyStateView: UIStackView!
+    @IBOutlet weak var segmentContainerView: UIView!
+    @IBOutlet weak var segmentControlView: UISegmentedControl!
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -46,11 +30,106 @@ class ActivityController: UIViewController {
 
         activityTableView.dataSource = self
         activityTableView.delegate = self
+        
+        segmentContainerView.layer.borderColor = UIColor.systemGray4.cgColor
+        segmentContainerView.layer.borderWidth = 1
+        
+        fetch()
     }
 
     @IBAction func startButtonDidPressed(_ sender: Any) {
-        emptyStateView.isHidden = true
-        activityTableView.isHidden = false
+        self.performSegue(withIdentifier: "ActivityCreatorView", sender: self)
+    }
+    
+    @IBAction func segmentControlDidChange(_ sender: Any) {
+        activitiesGroup = segmentControlView.selectedSegmentIndex
+    }
+    
+    private func fetch() {
+        if activitiesGroup == 0 {
+            fetchUserActivities()
+        } else {
+            fetchSocialActivities()
+        }
+    }
+    
+    private func fetchSocialActivities() {
+        ActivityService.activities { activities in
+            let activities: [ActivityCellModel] = activities.items.map { activity in
+                let image = UIImage(systemName: "bicycle.circle.fill") ?? UIImage()
+                let duration = activity.endsAt.timeIntervalSinceReferenceDate - activity.startsAt.timeIntervalSinceReferenceDate
+                let distance = activity.geoTrack.distance(from: 0, to: activity.geoTrack.count)
+
+                return ActivityCellModel(distance: String(distance),
+                                         name: activity.user.name,
+                                         duration: String(duration),
+                                         type: activity.activityType.name,
+                                         icon: image,
+                                         startDate: activity.startsAt,
+                                         stopDate: activity.endsAt)
+            }
+            let sortedActivities = activities.sorted { $0.startDate > $1.startDate }
+            
+            let grouppedActivities = Dictionary(grouping: sortedActivities, by: { self.callendarDate($0.startDate) }).sorted(by: {
+                $0.key > $1.key
+            })
+            
+            self.tableData = grouppedActivities.map { (date, activities) in
+                return ActivitiesTableModel(date: date, activities: activities)
+            }
+            self.reloadTable()
+        } reject: { err in
+            DispatchQueue.main.async {
+                self.segmentControlView.selectedSegmentIndex = 0
+            }
+        }
+    }
+    
+    private func callendarDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.dateFormat = "d MMM y"
+
+        return formatter.string(from: date)
+    }
+    
+    private func fetchUserActivities() {
+        let context = FEFUCoreDataContainer.instance.context
+        let request = CDActivity.fetchRequest()
+
+        do {
+            let rawActivities = try context.fetch(request)
+            let activities: [ActivityCellModel] = rawActivities.map { activity in
+                let image = UIImage(systemName: "bicycle.circle.fill") ?? UIImage()
+                return ActivityCellModel(distance: activity.distance,
+                                         name: "",
+                                         duration: activity.duration,
+                                         type: activity.type,
+                                         icon: image,
+                                         startDate: activity.startDate,
+                                         stopDate: activity.stopDate)
+            }
+            let sortedActivities = activities.sorted { $0.startDate > $1.startDate }
+            
+            let grouppedActivities = Dictionary(grouping: sortedActivities, by: { callendarDate($0.startDate) }).sorted(by: {
+                $0.key < $1.key
+            })
+            
+            tableData = grouppedActivities.map { (date, activities) in
+                return ActivitiesTableModel(date: date, activities: activities)
+            }
+            reloadTable()
+        } catch {
+            print(error)
+        }
+    }
+
+    private func reloadTable() {
+        DispatchQueue.main.async {
+            self.activityTableView.reloadData()
+            self.activityTableView.isHidden = self.tableData.isEmpty
+            self.emptyStateView.isHidden = !self.tableData.isEmpty
+        }
     }
 }
 
@@ -91,7 +170,7 @@ extension ActivityController: UITableViewDataSource, UITableViewDelegate {
 
         self.selectedSection = indexPath.section
         self.selectedRow = indexPath.row
-        performSegue(withIdentifier: "ActivityDetailsView", sender: nil)
+        self.performSegue(withIdentifier: "ActivityDetailsView", sender: nil)
     }
 
     override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
@@ -99,8 +178,17 @@ extension ActivityController: UITableViewDataSource, UITableViewDelegate {
         case "ActivityDetailsView":
             let destination = segue.destination as! ActivityDetailsController
             destination.model = self.tableData[self.selectedSection].activities[self.selectedRow]
+        case "ActivityCreatorView":
+            let destination = segue.destination as! ActivityCreatorController
+            destination.delegate = self
         default:
             break
         }
+    }
+}
+
+extension ActivityController: ActivityCreatorDelegate {
+    func activityDidCreate() {
+        fetch()
     }
 }

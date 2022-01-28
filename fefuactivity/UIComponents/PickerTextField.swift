@@ -2,6 +2,8 @@ import UIKit
 
 class PickerTextField: CustomTextField {
 
+    var code: Int = 0
+
     private let genders: [String] = ["Мужской", "Женский"]
 
     let pickerIndicator = UIButton(type: .custom)
@@ -15,7 +17,7 @@ class PickerTextField: CustomTextField {
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
-        
+
         initTextField()
     }
 
@@ -48,6 +50,7 @@ extension PickerTextField: UIPickerViewDataSource, UIPickerViewDelegate {
 
     func pickerView(_ pickerView: UIPickerView, didSelectRow row: Int, inComponent component: Int) {
         self.text = genders[row]
+        self.code = row
         self.resignFirstResponder()
     }
 }
